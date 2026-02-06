@@ -17,13 +17,17 @@ pub enum Action {
 }
 
 /// What was the result of this game?
+///
+/// In bughouse, there is no checkmate or stalemate. Instead, the game ends
+/// when a king is captured (detected as "king capturable" after a move).
 #[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 pub enum GameResult {
-    WhiteCheckmates,
+    /// White captured black's king (white wins)
+    BlackKingCaptured,
+    /// Black captured white's king (black wins)
+    WhiteKingCaptured,
     WhiteResigns,
-    BlackCheckmates,
     BlackResigns,
-    Stalemate,
     DrawAccepted,
     DrawDeclared,
 }
@@ -43,7 +47,7 @@ impl Game {
     /// Create a new `Game` with the initial position.
     ///
     /// ```
-    /// use chess::{Game, Board};
+    /// use bughouse_chess::{Game, Board};
     ///
     /// let game = Game::new();
     /// assert_eq!(game.current_position(), Board::default());
@@ -58,7 +62,7 @@ impl Game {
     /// Create a new `Game` with a specific starting position.
     ///
     /// ```
-    /// use chess::{Game, Board};
+    /// use bughouse_chess::{Game, Board};
     ///
     /// let game = Game::new_with_board(Board::default());
     /// assert_eq!(game.current_position(), Board::default());
@@ -73,7 +77,7 @@ impl Game {
     /// Get all actions made in this game (moves, draw offers, resignations, etc.)
     ///
     /// ```
-    /// use chess::{Game, MoveGen, Color};
+    /// use bughouse_chess::{Game, MoveGen, Color};
     ///
     /// let mut game = Game::new();
     /// let mut movegen = MoveGen::new_legal(&game.current_position());
@@ -89,21 +93,24 @@ impl Game {
     /// What is the status of this game?
     ///
     /// ```
-    /// use chess::Game;
+    /// use bughouse_chess::Game;
     ///
     /// let game = Game::new();
     /// assert!(game.result().is_none());
     /// ```
     pub fn result(&self) -> Option<GameResult> {
         match self.current_position().status() {
-            BoardStatus::Checkmate => {
+            BoardStatus::KingCapturable => {
+                // The side to move can capture the opponent's king.
+                // This means the PREVIOUS move left the king in danger.
                 if self.side_to_move() == Color::White {
-                    Some(GameResult::BlackCheckmates)
+                    // White can capture black's king
+                    Some(GameResult::BlackKingCaptured)
                 } else {
-                    Some(GameResult::WhiteCheckmates)
+                    // Black can capture white's king
+                    Some(GameResult::WhiteKingCaptured)
                 }
             }
-            BoardStatus::Stalemate => Some(GameResult::Stalemate),
             BoardStatus::Ongoing => {
                 if self.moves.len() == 0 {
                     None
@@ -125,7 +132,7 @@ impl Game {
     /// Create a new `Game` object from an FEN string.
     ///
     /// ```
-    /// use chess::{Game, Board};
+    /// use bughouse_chess::{Game, Board};
     ///
     /// // This is the better way:
     /// # {
@@ -150,7 +157,7 @@ impl Game {
     /// Get the current position on the board from the `Game` object.
     ///
     /// ```
-    /// use chess::{Game, Board};
+    /// use bughouse_chess::{Game, Board};
     ///
     /// let game = Game::new();
     /// assert_eq!(game.current_position(), Board::default());
@@ -173,7 +180,7 @@ impl Game {
     /// Determine if a player can legally declare a draw by 3-fold repetition or 50-move rule.
     ///
     /// ```
-    /// use chess::{Game, Square, ChessMove};
+    /// use bughouse_chess::{Game, Square, ChessMove};
     ///
     /// let b1c3 = ChessMove::new(Square::B1, Square::C3, None);
     /// let c3b1 = ChessMove::new(Square::C3, Square::B1, None);
@@ -260,7 +267,7 @@ impl Game {
     /// Declare a draw by 3-fold repitition or 50-move rule.
     ///
     /// ```
-    /// use chess::{Game, Square, ChessMove};
+    /// use bughouse_chess::{Game, Square, ChessMove};
     ///
     /// let b1c3 = ChessMove::new(Square::B1, Square::C3, None);
     /// let c3b1 = ChessMove::new(Square::C3, Square::B1, None);
@@ -297,7 +304,7 @@ impl Game {
     /// Make a chess move on the board
     ///
     /// ```
-    /// use chess::{Game, MoveGen};
+    /// use bughouse_chess::{Game, MoveGen};
     ///
     /// let mut game = Game::new();
     ///
@@ -320,7 +327,7 @@ impl Game {
     /// Who's turn is it to move?
     ///
     /// ```
-    /// use chess::{Game, Color};
+    /// use bughouse_chess::{Game, Color};
     ///
     /// let game = Game::new();
     /// assert_eq!(game.side_to_move(), Color::White);
@@ -351,7 +358,7 @@ impl Game {
     /// accepted before my opponent moves.
     ///
     /// ```
-    /// use chess::{Game, Color};
+    /// use bughouse_chess::{Game, Color};
     ///
     /// let mut game = Game::new();
     /// game.offer_draw(Color::White);
@@ -367,7 +374,7 @@ impl Game {
     /// Accept a draw offer from my opponent.
     ///
     /// ```
-    /// use chess::{Game, MoveGen, Color};
+    /// use bughouse_chess::{Game, MoveGen, Color};
     ///
     /// let mut game = Game::new();
     /// game.offer_draw(Color::Black);
@@ -405,7 +412,7 @@ impl Game {
     /// `color` resigns the game
     ///
     /// ```
-    /// use chess::{Game, Color};
+    /// use bughouse_chess::{Game, Color};
     ///
     /// let mut game = Game::new();
     /// game.resign(Color::White);
