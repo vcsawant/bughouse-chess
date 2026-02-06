@@ -43,14 +43,14 @@ impl fmt::Display for BughouseMove {
         match self {
             BughouseMove::Regular(m) => write!(f, "{}", m),
             BughouseMove::Drop { piece, square } => {
-                // UCI drop notation: P@e4 (uppercase piece letter, @, square)
+                // BUP drop notation: p@e4 (lowercase piece letter, @, square)
                 let piece_char = match piece {
-                    Piece::Pawn => 'P',
-                    Piece::Knight => 'N',
-                    Piece::Bishop => 'B',
-                    Piece::Rook => 'R',
-                    Piece::Queen => 'Q',
-                    Piece::King => 'K',
+                    Piece::Pawn => 'p',
+                    Piece::Knight => 'n',
+                    Piece::Bishop => 'b',
+                    Piece::Rook => 'r',
+                    Piece::Queen => 'q',
+                    Piece::King => 'k',
                 };
                 write!(f, "{}@{}", piece_char, square)
             }
@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn test_drop_display() {
         let m = BughouseMove::drop_piece(Piece::Pawn, Square::from_str("e4").unwrap());
-        assert_eq!(format!("{}", m), "P@e4");
+        assert_eq!(format!("{}", m), "p@e4");
     }
 
     #[test]
