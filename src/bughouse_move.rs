@@ -43,7 +43,7 @@ impl fmt::Display for BughouseMove {
         match self {
             BughouseMove::Regular(m) => write!(f, "{}", m),
             BughouseMove::Drop { piece, square } => {
-                // BUP drop notation: p@e4 (lowercase piece letter, @, square)
+                // UBI drop notation: p@e4 (lowercase piece letter, @, square)
                 let piece_char = match piece {
                     Piece::Pawn => 'p',
                     Piece::Knight => 'n',

@@ -145,5 +145,5 @@ RUSTFLAGS="-C target-cpu=native" cargo build --release
 
 ## Used By
 
-- [bughouse-engine](https://github.com/vcsawant/bughouse-engine) — Rust bughouse engine (BUP protocol)
+- [bughouse-engine](https://github.com/vcsawant/bughouse-engine) — Rust bughouse engine (UBI protocol)
 - [bughouse](https://github.com/vcsawant/bughouse) — Phoenix LiveView bughouse platform
