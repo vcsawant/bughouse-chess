@@ -181,6 +181,17 @@ impl PieceType for PawnType {
             let files = get_adjacent_files(ep_sq.get_file());
             for src in rank & files & pieces {
                 let dest = ep_sq.uforward(color);
+
+                // In check, EP must address the check: either capture the
+                // checking pawn or land on a blocking square.
+                if T::IN_CHECK {
+                    let ep_captured_bb = BitBoard::from_square(ep_sq);
+                    let dest_bb = BitBoard::from_square(dest);
+                    if (ep_captured_bb & checkers) == EMPTY && (dest_bb & check_mask) == EMPTY {
+                        continue;
+                    }
+                }
+
                 if PawnType::legal_ep_move(board, src, dest) {
                     unsafe {
                         movelist.push_unchecked(SquareAndBitBoard::new(

@@ -1,10 +1,12 @@
+use crate::bitboard::{BitBoard, EMPTY};
 use crate::board::Board;
 use crate::castle_rights::CastleRights;
-use crate::color::Color;
+use crate::color::{Color, NUM_COLORS};
 use crate::error::Error;
 use crate::file::{File, ALL_FILES};
 use crate::piece::Piece;
 use crate::rank::{Rank, ALL_RANKS};
+use crate::reserve::Reserve;
 use crate::square::{Square, ALL_SQUARES};
 
 use std::fmt;
@@ -21,7 +23,7 @@ use std::str::FromStr;
 /// * You want to convert between formats like FEN.
 ///
 /// ```
-/// use chess::{BoardBuilder, Board, Square, Color, Piece};
+/// use bughouse_chess::{BoardBuilder, Board, Square, Color, Piece};
 /// use std::convert::TryFrom;
 /// let mut position = BoardBuilder::new();
 /// position.piece(Square::A1, Piece::King, Color::White);
@@ -34,9 +36,9 @@ use std::str::FromStr;
 /// // White is in check, but that's ok, it's white's turn to move.
 /// assert!(Board::try_from(&position).is_ok());
 ///
-/// // Now White is in check, but Black is ready to move.  This position is invalid.
+/// // In bughouse, opponent in check is allowed (for positions received from partner board).
 /// position.side_to_move(Color::Black);
-/// assert!(Board::try_from(position).is_err());
+/// assert!(Board::try_from(position).is_ok());
 ///
 /// // One liners are possible with the builder pattern.
 /// use std::convert::TryInto;
@@ -53,6 +55,8 @@ pub struct BoardBuilder {
     side_to_move: Color,
     castle_rights: [CastleRights; 2],
     en_passant: Option<File>,
+    reserves: [Reserve; NUM_COLORS],
+    promoted: BitBoard,
 }
 
 impl BoardBuilder {
@@ -63,10 +67,10 @@ impl BoardBuilder {
     /// * `en_passant` is not set
     /// * `side_to_move` is Color::White
     /// ```
-    /// use chess::{BoardBuilder, Board, Square, Color, Piece};
+    /// use bughouse_chess::{BoardBuilder, Board, Square, Color, Piece};
     /// use std::convert::TryInto;
     ///
-    /// # use chess::Error;
+    /// # use bughouse_chess::Error;
     /// # fn main() -> Result<(), Error> {
     /// let board: Board = BoardBuilder::new()
     ///     .piece(Square::A1, Piece::King, Color::White)
@@ -81,16 +85,18 @@ impl BoardBuilder {
             side_to_move: Color::White,
             castle_rights: [CastleRights::NoRights, CastleRights::NoRights],
             en_passant: None,
+            reserves: [Reserve::new(); NUM_COLORS],
+            promoted: EMPTY,
         }
     }
 
     /// Set up a board with everything pre-loaded.
     ///
     /// ```
-    /// use chess::{BoardBuilder, Board, Square, Color, Piece, CastleRights};
+    /// use bughouse_chess::{BoardBuilder, Board, Square, Color, Piece, CastleRights};
     /// use std::convert::TryInto;
     ///
-    /// # use chess::Error;
+    /// # use bughouse_chess::Error;
     /// # fn main() -> Result<(), Error> {
     /// let board: Board = BoardBuilder::setup(
     ///         &[
@@ -116,6 +122,8 @@ impl BoardBuilder {
             side_to_move: side_to_move,
             castle_rights: [white_castle_rights, black_castle_rights],
             en_passant: en_passant,
+            reserves: [Reserve::new(); NUM_COLORS],
+            promoted: EMPTY,
         };
 
         for piece in pieces.into_iter() {
@@ -128,7 +136,7 @@ impl BoardBuilder {
     /// Get the current player
     ///
     /// ```
-    /// use chess::{BoardBuilder, Board, Color};
+    /// use bughouse_chess::{BoardBuilder, Board, Color};
     ///
     /// let bb: BoardBuilder = Board::default().into();
     /// assert_eq!(bb.get_side_to_move(), Color::White);
@@ -140,7 +148,7 @@ impl BoardBuilder {
     /// Get the castle rights for a player
     ///
     /// ```
-    /// use chess::{BoardBuilder, Board, CastleRights, Color};
+    /// use bughouse_chess::{BoardBuilder, Board, CastleRights, Color};
     ///
     /// let bb: BoardBuilder = Board::default().into();
     /// assert_eq!(bb.get_castle_rights(Color::White), CastleRights::Both);
@@ -152,7 +160,7 @@ impl BoardBuilder {
     /// Get the current en_passant square
     ///
     /// ```
-    /// use chess::{BoardBuilder, Board, Square, ChessMove};
+    /// use bughouse_chess::{BoardBuilder, Board, Square, ChessMove};
     ///
     /// let board = Board::default()
     ///     .make_move_new(ChessMove::new(Square::E2, Square::E4, None))
@@ -172,7 +180,7 @@ impl BoardBuilder {
     /// This function can be used on self directly or in a builder pattern.
     ///
     /// ```
-    /// use chess::{BoardBuilder, Color};
+    /// use bughouse_chess::{BoardBuilder, Color};
     /// BoardBuilder::new()
     ///              .side_to_move(Color::Black);      
     ///
@@ -189,7 +197,7 @@ impl BoardBuilder {
     /// This function can be used on self directly or in a builder pattern.
     ///
     /// ```
-    /// use chess::{BoardBuilder, Color, CastleRights};
+    /// use bughouse_chess::{BoardBuilder, Color, CastleRights};
     /// BoardBuilder::new()
     ///              .castle_rights(Color::White, CastleRights::NoRights);
     ///
@@ -214,7 +222,7 @@ impl BoardBuilder {
     /// This function can be used on self directly or in a builder pattern.
     ///
     /// ```
-    /// use chess::{BoardBuilder, Color, Square, Piece};
+    /// use bughouse_chess::{BoardBuilder, Color, Square, Piece};
     ///
     /// BoardBuilder::new()
     ///              .piece(Square::A1, Piece::Rook, Color::White);
@@ -234,7 +242,7 @@ impl BoardBuilder {
     /// This function can be used on self directly or in a builder pattern.
     ///
     /// ```
-    /// use chess::{BoardBuilder, Square, Board};
+    /// use bughouse_chess::{BoardBuilder, Square, Board};
     ///
     /// let mut bb: BoardBuilder = Board::default().into();
     /// bb.clear_square(Square::A1);
@@ -249,7 +257,7 @@ impl BoardBuilder {
     /// This function can be used directly or in a builder pattern.
     ///
     /// ```
-    /// use chess::{BoardBuilder, Square, Board, File, Color, Piece};
+    /// use bughouse_chess::{BoardBuilder, Square, Board, File, Color, Piece};
     ///
     /// BoardBuilder::new()
     ///              .piece(Square::E4, Piece::Pawn, Color::White)
@@ -257,6 +265,28 @@ impl BoardBuilder {
     /// ```
     pub fn en_passant<'a>(&'a mut self, file: Option<File>) -> &'a mut Self {
         self.en_passant = file;
+        self
+    }
+
+    /// Get the reserves for both colors.
+    pub fn get_reserves(&self) -> [Reserve; NUM_COLORS] {
+        self.reserves
+    }
+
+    /// Get the promoted pieces bitboard.
+    pub fn get_promoted(&self) -> BitBoard {
+        self.promoted
+    }
+
+    /// Set the reserves for both colors.
+    pub fn set_reserves(&mut self, reserves: [Reserve; NUM_COLORS]) -> &mut Self {
+        self.reserves = reserves;
+        self
+    }
+
+    /// Mark a square as containing a promoted piece.
+    pub fn mark_promoted(&mut self, square: Square) -> &mut Self {
+        self.promoted |= BitBoard::from_square(square);
         self
     }
 }
@@ -280,7 +310,8 @@ impl fmt::Display for BoardBuilder {
         let mut count = 0;
         for rank in ALL_RANKS.iter().rev() {
             for file in ALL_FILES.iter() {
-                let square = Square::make_square(*rank, *file).to_index();
+                let sq = Square::make_square(*rank, *file);
+                let square = sq.to_index();
 
                 if self.pieces[square].is_some() && count != 0 {
                     write!(f, "{}", count)?;
@@ -289,6 +320,9 @@ impl fmt::Display for BoardBuilder {
 
                 if let Some((piece, color)) = self.pieces[square] {
                     write!(f, "{}", piece.to_string(color))?;
+                    if self.promoted & BitBoard::from_square(sq) != EMPTY {
+                        write!(f, "~")?;
+                    }
                 } else {
                     count += 1;
                 }
@@ -303,6 +337,36 @@ impl fmt::Display for BoardBuilder {
             }
             count = 0;
         }
+
+        // Emit reserves in BFEN format: [QRBNPqrbnp]
+        write!(f, "[")?;
+        // White pieces (uppercase): Q, R, B, N, P
+        for &(piece, ch) in &[
+            (Piece::Queen, 'Q'),
+            (Piece::Rook, 'R'),
+            (Piece::Bishop, 'B'),
+            (Piece::Knight, 'N'),
+            (Piece::Pawn, 'P'),
+        ] {
+            let cnt = self.reserves[Color::White.to_index()].count(piece);
+            for _ in 0..cnt {
+                write!(f, "{}", ch)?;
+            }
+        }
+        // Black pieces (lowercase): q, r, b, n, p
+        for &(piece, ch) in &[
+            (Piece::Queen, 'q'),
+            (Piece::Rook, 'r'),
+            (Piece::Bishop, 'b'),
+            (Piece::Knight, 'n'),
+            (Piece::Pawn, 'p'),
+        ] {
+            let cnt = self.reserves[Color::Black.to_index()].count(piece);
+            for _ in 0..cnt {
+                write!(f, "{}", ch)?;
+            }
+        }
+        write!(f, "]")?;
 
         write!(f, " ")?;
 
@@ -360,88 +424,92 @@ impl FromStr for BoardBuilder {
             });
         }
 
-        let pieces = tokens[0];
+        let pieces_token = tokens[0];
         let side = tokens[1];
         let castles = tokens[2];
         let ep = tokens[3];
 
-        for x in pieces.chars() {
-            match x {
+        // Split piece placement from reserve brackets [...]
+        let (pieces, reserve_str) = if let Some(bracket_start) = pieces_token.find('[') {
+            let bracket_end = pieces_token.find(']').ok_or(Error::InvalidFen {
+                fen: value.to_string(),
+            })?;
+            (
+                &pieces_token[..bracket_start],
+                Some(&pieces_token[bracket_start + 1..bracket_end]),
+            )
+        } else {
+            (pieces_token, None)
+        };
+
+        // Parse piece placement with ~ promoted markers
+        let mut chars = pieces.chars().peekable();
+        while let Some(x) = chars.next() {
+            let (piece, color) = match x {
                 '/' => {
                     cur_rank = cur_rank.down();
                     cur_file = File::A;
+                    continue;
                 }
-                '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' => {
+                '1'..='8' => {
                     cur_file =
                         File::from_index(cur_file.to_index() + (x as usize) - ('0' as usize));
+                    continue;
                 }
-                'r' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::Rook, Color::Black));
-                    cur_file = cur_file.right();
-                }
-                'R' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::Rook, Color::White));
-                    cur_file = cur_file.right();
-                }
-                'n' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::Knight, Color::Black));
-                    cur_file = cur_file.right();
-                }
-                'N' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::Knight, Color::White));
-                    cur_file = cur_file.right();
-                }
-                'b' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::Bishop, Color::Black));
-                    cur_file = cur_file.right();
-                }
-                'B' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::Bishop, Color::White));
-                    cur_file = cur_file.right();
-                }
-                'p' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::Pawn, Color::Black));
-                    cur_file = cur_file.right();
-                }
-                'P' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::Pawn, Color::White));
-                    cur_file = cur_file.right();
-                }
-                'q' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::Queen, Color::Black));
-                    cur_file = cur_file.right();
-                }
-                'Q' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::Queen, Color::White));
-                    cur_file = cur_file.right();
-                }
-                'k' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::King, Color::Black));
-                    cur_file = cur_file.right();
-                }
-                'K' => {
-                    fen[Square::make_square(cur_rank, cur_file)] =
-                        Some((Piece::King, Color::White));
-                    cur_file = cur_file.right();
-                }
+                'r' => (Piece::Rook, Color::Black),
+                'R' => (Piece::Rook, Color::White),
+                'n' => (Piece::Knight, Color::Black),
+                'N' => (Piece::Knight, Color::White),
+                'b' => (Piece::Bishop, Color::Black),
+                'B' => (Piece::Bishop, Color::White),
+                'p' => (Piece::Pawn, Color::Black),
+                'P' => (Piece::Pawn, Color::White),
+                'q' => (Piece::Queen, Color::Black),
+                'Q' => (Piece::Queen, Color::White),
+                'k' => (Piece::King, Color::Black),
+                'K' => (Piece::King, Color::White),
                 _ => {
                     return Err(Error::InvalidFen {
                         fen: value.to_string(),
                     });
                 }
+            };
+
+            let sq = Square::make_square(cur_rank, cur_file);
+            fen[sq] = Some((piece, color));
+
+            // Check for ~ promoted marker
+            if chars.peek() == Some(&'~') {
+                chars.next(); // consume the ~
+                fen.promoted |= BitBoard::from_square(sq);
+            }
+
+            cur_file = cur_file.right();
+        }
+
+        // Parse reserves from bracket content
+        if let Some(reserve_content) = reserve_str {
+            for ch in reserve_content.chars() {
+                match ch {
+                    'Q' => fen.reserves[Color::White.to_index()].add(Piece::Queen),
+                    'R' => fen.reserves[Color::White.to_index()].add(Piece::Rook),
+                    'B' => fen.reserves[Color::White.to_index()].add(Piece::Bishop),
+                    'N' => fen.reserves[Color::White.to_index()].add(Piece::Knight),
+                    'P' => fen.reserves[Color::White.to_index()].add(Piece::Pawn),
+                    'q' => fen.reserves[Color::Black.to_index()].add(Piece::Queen),
+                    'r' => fen.reserves[Color::Black.to_index()].add(Piece::Rook),
+                    'b' => fen.reserves[Color::Black.to_index()].add(Piece::Bishop),
+                    'n' => fen.reserves[Color::Black.to_index()].add(Piece::Knight),
+                    'p' => fen.reserves[Color::Black.to_index()].add(Piece::Pawn),
+                    _ => {
+                        return Err(Error::InvalidFen {
+                            fen: value.to_string(),
+                        });
+                    }
+                }
             }
         }
+
         match side {
             "w" | "W" => fen = fen.side_to_move(Color::White),
             "b" | "B" => fen = fen.side_to_move(Color::Black),
@@ -490,13 +558,16 @@ impl From<&Board> for BoardBuilder {
             }
         }
 
-        BoardBuilder::setup(
+        let mut bb = BoardBuilder::setup(
             &pieces,
             board.side_to_move(),
             board.castle_rights(Color::White),
             board.castle_rights(Color::Black),
             board.en_passant().map(|sq| sq.get_file()),
-        )
+        );
+        bb.reserves = *board.reserves();
+        bb.promoted = board.promoted();
+        bb
     }
 }
 
@@ -507,13 +578,11 @@ impl From<Board> for BoardBuilder {
 }
 
 #[cfg(test)]
-use crate::bitboard::BitBoard;
-#[cfg(test)]
 use std::convert::TryInto;
 
 #[test]
 fn check_initial_position() {
-    let initial_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    let initial_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR[] w KQkq - 0 1";
     let fen: BoardBuilder = Board::default().into();
     let computed_initial_fen = format!("{}", fen);
     assert_eq!(computed_initial_fen, initial_fen);
@@ -534,11 +603,12 @@ fn invalid_castle_rights() {
 
 #[test]
 fn test_kissing_kings() {
+    // In bughouse, adjacent kings are legal (relaxed is_sane)
     let res: Result<Board, _> = BoardBuilder::new()
         .piece(Square::A1, Piece::King, Color::White)
         .piece(Square::A2, Piece::King, Color::Black)
         .try_into();
-    assert!(res.is_err());
+    assert!(res.is_ok());
 }
 
 #[test]
@@ -551,7 +621,8 @@ fn test_in_check() {
     let board: Board = (&bb).try_into().unwrap();
     assert_eq!(*board.checkers(), BitBoard::from_square(Square::H1));
 
+    // In bughouse, opponent in check is allowed (relaxed is_sane)
     bb.side_to_move(Color::Black);
     let res: Result<Board, _> = bb.try_into();
-    assert!(res.is_err()); // My opponent cannot be in check when it's my move.
+    assert!(res.is_ok());
 }
