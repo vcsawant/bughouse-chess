@@ -50,7 +50,7 @@ impl ChessMove {
     /// Convert a SAN (Standard Algebraic Notation) move into a `ChessMove`
     ///
     /// ```
-    /// use bughouse_chess::{Board, ChessMove, Square};
+    /// use chess::{Board, ChessMove, Square};
     ///
     /// let board = Board::default();
     /// assert_eq!(
@@ -403,7 +403,7 @@ impl Ord for ChessMove {
 
 /// Convert a UCI `String` to a move. If invalid, return `None`
 /// ```
-/// use bughouse_chess::{ChessMove, Square, Piece};
+/// use chess::{ChessMove, Square, Piece};
 /// use std::str::FromStr;
 ///
 /// let mv = ChessMove::new(Square::E7, Square::E8, Some(Piece::Queen));

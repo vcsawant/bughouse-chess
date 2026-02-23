@@ -6,27 +6,21 @@ use crate::color::{Color, ALL_COLORS, NUM_COLORS};
 use crate::error::Error;
 use crate::file::File;
 use crate::magic::{
-    between, get_adjacent_files, get_bishop_moves, get_bishop_rays, get_castle_moves, get_file,
-    get_king_moves, get_knight_moves, get_pawn_attacks, get_pawn_dest_double_moves,
-    get_pawn_source_double_moves, get_rank, get_rook_moves, get_rook_rays,
+    between, get_adjacent_files, get_bishop_rays, get_castle_moves, get_file, get_king_moves,
+    get_knight_moves, get_pawn_attacks, get_pawn_dest_double_moves, get_pawn_source_double_moves,
+    get_rank, get_rook_rays,
 };
 use crate::movegen::*;
 use crate::piece::{Piece, ALL_PIECES, NUM_PIECES};
-use crate::rank::Rank;
-use crate::reserve::Reserve;
 use crate::square::{Square, ALL_SQUARES};
 use crate::zobrist::Zobrist;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::mem;
 use std::str::FromStr;
 
-/// A representation of a bughouse chess board.
-///
-/// Extends the standard chess board with:
-/// - `reserves`: pieces available for dropping (one per color)
-/// - `promoted`: bitboard tracking which squares contain promoted pieces
-///   (promoted pieces demote to pawns when captured in bughouse)
+/// A representation of a chess board.  That's why you're here, right?
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Board {
     pieces: [BitBoard; NUM_PIECES],
@@ -38,19 +32,14 @@ pub struct Board {
     checkers: BitBoard,
     hash: u64,
     en_passant: Option<Square>,
-    reserves: [Reserve; NUM_COLORS],
-    promoted: BitBoard,
 }
 
 /// What is the status of this game?
-///
-/// In bughouse, there is no checkmate or stalemate. Instead, the game ends
-/// when a king is capturable (the side to move can take the opponent's king).
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
 pub enum BoardStatus {
     Ongoing,
-    /// The side to move can capture the opponent's king — game over.
-    KingCapturable,
+    Stalemate,
+    Checkmate,
 }
 
 /// Construct the initial position.
@@ -82,17 +71,15 @@ impl Board {
             checkers: EMPTY,
             hash: 0,
             en_passant: None,
-            reserves: [Reserve::new(); NUM_COLORS],
-            promoted: EMPTY,
         }
     }
 
     /// Construct a board from a FEN string.
     ///
     /// ```
-    /// use bughouse_chess::Board;
+    /// use chess::Board;
     /// use std::str::FromStr;
-    /// # use bughouse_chess::Error;
+    /// # use chess::Error;
     ///
     /// # fn main() -> Result<(), Error> {
     ///
@@ -127,58 +114,64 @@ impl Board {
         size
     }
 
-    /// Is the opponent's king capturable?
-    ///
-    /// In bughouse, the game ends when a king can be captured by the side to move.
-    /// There is no checkmate or stalemate concept.
+    /// Is this game Ongoing, is it Stalemate, or is it Checkmate?
     ///
     /// ```
-    /// use bughouse_chess::{Board, BoardStatus};
+    /// use chess::{Board, BoardStatus, Square, ChessMove};
     ///
-    /// let board = Board::default();
+    /// let mut board = Board::default();
+    ///
     /// assert_eq!(board.status(), BoardStatus::Ongoing);
+    ///
+    /// board = board.make_move_new(ChessMove::new(Square::E2,
+    ///                                            Square::E4,
+    ///                                            None));
+    ///
+    /// assert_eq!(board.status(), BoardStatus::Ongoing);
+    ///
+    /// board = board.make_move_new(ChessMove::new(Square::F7,
+    ///                                            Square::F6,
+    ///                                            None));
+    ///
+    /// assert_eq!(board.status(), BoardStatus::Ongoing);
+    ///
+    /// board = board.make_move_new(ChessMove::new(Square::D2,
+    ///                                            Square::D4,
+    ///                                            None));
+    ///
+    /// assert_eq!(board.status(), BoardStatus::Ongoing);
+    ///
+    /// board = board.make_move_new(ChessMove::new(Square::G7,
+    ///                                            Square::G5,
+    ///                                            None));
+    ///
+    /// assert_eq!(board.status(), BoardStatus::Ongoing);
+    ///
+    /// board = board.make_move_new(ChessMove::new(Square::D1,
+    ///                                            Square::H5,
+    ///                                            None));
+    ///
+    /// assert_eq!(board.status(), BoardStatus::Checkmate);
     /// ```
     #[inline]
     pub fn status(&self) -> BoardStatus {
-        let their_king_sq = self.king_square(!self.side_to_move);
-        if self.attackers_to(their_king_sq) & self.color_combined(self.side_to_move) != EMPTY {
-            BoardStatus::KingCapturable
-        } else {
-            BoardStatus::Ongoing
+        let moves = MoveGen::new_legal(&self).len();
+        match moves {
+            0 => {
+                if self.checkers == EMPTY {
+                    BoardStatus::Stalemate
+                } else {
+                    BoardStatus::Checkmate
+                }
+            }
+            _ => BoardStatus::Ongoing,
         }
-    }
-
-    /// Returns a bitboard of all pieces that attack a given square.
-    #[inline]
-    pub fn attackers_to(&self, square: Square) -> BitBoard {
-        let mut attackers = EMPTY;
-        let combined = *self.combined();
-
-        // Knights
-        attackers |= get_knight_moves(square) & self.pieces(Piece::Knight);
-
-        // Pawns (attacked by white pawns from below, black pawns from above)
-        attackers |= get_pawn_attacks(square, Color::White, self.pieces(Piece::Pawn) & self.color_combined(Color::Black));
-        attackers |= get_pawn_attacks(square, Color::Black, self.pieces(Piece::Pawn) & self.color_combined(Color::White));
-
-        // King
-        attackers |= get_king_moves(square) & self.pieces(Piece::King);
-
-        // Bishops and queens (diagonal)
-        let bishop_attacks = get_bishop_moves(square, combined);
-        attackers |= bishop_attacks & (self.pieces(Piece::Bishop) | self.pieces(Piece::Queen));
-
-        // Rooks and queens (straight)
-        let rook_attacks = get_rook_moves(square, combined);
-        attackers |= rook_attacks & (self.pieces(Piece::Rook) | self.pieces(Piece::Queen));
-
-        attackers
     }
 
     /// Grab the "combined" `BitBoard`.  This is a `BitBoard` with every piece.
     ///
     /// ```
-    /// use bughouse_chess::{Board, BitBoard, Rank, get_rank};
+    /// use chess::{Board, BitBoard, Rank, get_rank};
     ///
     /// let board = Board::default();
     ///
@@ -198,7 +191,7 @@ impl Board {
     /// color.
     ///
     /// ```
-    /// use bughouse_chess::{Board, BitBoard, Rank, get_rank, Color};
+    /// use chess::{Board, BitBoard, Rank, get_rank, Color};
     ///
     /// let board = Board::default();
     ///
@@ -219,7 +212,7 @@ impl Board {
     /// Give me the `Square` the `color` king is on.
     ///
     /// ```
-    /// use bughouse_chess::{Board, Square, Color};
+    /// use chess::{Board, Square, Color};
     ///
     /// let board = Board::default();
     ///
@@ -234,7 +227,7 @@ impl Board {
     /// Grab the "pieces" `BitBoard`.  This is a `BitBoard` with every piece of a particular type.
     ///
     /// ```
-    /// use bughouse_chess::{Board, BitBoard, Piece, Square};
+    /// use chess::{Board, BitBoard, Piece, Square};
     ///
     /// // The rooks should be in each corner of the board
     /// let rooks = BitBoard::from_square(Square::A1) |
@@ -254,7 +247,7 @@ impl Board {
     /// Grab the `CastleRights` for a particular side.
     ///
     /// ```
-    /// use bughouse_chess::{Board, Square, CastleRights, Color, ChessMove};
+    /// use chess::{Board, Square, CastleRights, Color, ChessMove};
     ///
     /// let move1 = ChessMove::new(Square::A2,
     ///                            Square::A4,
@@ -306,7 +299,7 @@ impl Board {
     /// Remove castle rights for a particular side.
     ///
     /// ```
-    /// use bughouse_chess::{Board, CastleRights, Color};
+    /// use chess::{Board, CastleRights, Color};
     ///
     /// let mut board = Board::default();
     /// assert_eq!(board.castle_rights(Color::White), CastleRights::Both);
@@ -329,7 +322,7 @@ impl Board {
     /// Who's turn is it?
     ///
     /// ```
-    /// use bughouse_chess::{Board, Color};
+    /// use chess::{Board, Color};
     ///
     /// let mut board = Board::default();
     /// assert_eq!(board.side_to_move(), Color::White);
@@ -342,7 +335,7 @@ impl Board {
     /// Grab my `CastleRights`.
     ///
     /// ```
-    /// use bughouse_chess::{Board, Color, CastleRights};
+    /// use chess::{Board, Color, CastleRights};
     ///
     /// let mut board = Board::default();
     /// board.remove_castle_rights(Color::White, CastleRights::KingSide);
@@ -370,7 +363,7 @@ impl Board {
     /// Remove some of my `CastleRights`.
     ///
     /// ```
-    /// use bughouse_chess::{Board, CastleRights};
+    /// use chess::{Board, CastleRights};
     ///
     /// let mut board = Board::default();
     /// assert_eq!(board.my_castle_rights(), CastleRights::Both);
@@ -392,7 +385,7 @@ impl Board {
     /// My opponents `CastleRights`.
     ///
     /// ```
-    /// use bughouse_chess::{Board, Color, CastleRights};
+    /// use chess::{Board, Color, CastleRights};
     ///
     /// let mut board = Board::default();
     /// board.remove_castle_rights(Color::White, CastleRights::KingSide);
@@ -420,7 +413,7 @@ impl Board {
     /// Remove some of my opponents `CastleRights`.
     ///
     /// ```
-    /// use bughouse_chess::{Board, CastleRights};
+    /// use chess::{Board, CastleRights};
     ///
     /// let mut board = Board::default();
     /// assert_eq!(board.their_castle_rights(), CastleRights::Both);
@@ -452,7 +445,7 @@ impl Board {
     /// For a chess UI: set a piece on a particular square.
     ///
     /// ```
-    /// use bughouse_chess::{Board, Piece, Color, Square};
+    /// use chess::{Board, Piece, Color, Square};
     ///
     /// let board = Board::default();
     ///
@@ -485,15 +478,25 @@ impl Board {
             }
         }
 
-        // In bughouse, opponent can be in check, so skip that validation.
+        // If setting this piece down leaves my opponent in check, and it's my move, then the
+        // position is not a valid chess board
+        result.side_to_move = !result.side_to_move;
         result.update_pin_info();
+        if result.checkers != EMPTY {
+            return None;
+        }
+
+        // undo our damage
+        result.side_to_move = !result.side_to_move;
+        result.update_pin_info();
+
         Some(result)
     }
 
     /// For a chess UI: clear a particular square.
     ///
     /// ```
-    /// use bughouse_chess::{Board, Square, Piece};
+    /// use chess::{Board, Square, Piece};
     ///
     /// let board = Board::default();
     ///
@@ -522,8 +525,18 @@ impl Board {
             }
         }
 
-        // In bughouse, opponent can be in check, so skip that validation.
+        // If setting this piece down leaves my opponent in check, and it's my move, then the
+        // position is not a valid chess board
+        result.side_to_move = !result.side_to_move;
         result.update_pin_info();
+        if result.checkers != EMPTY {
+            return None;
+        }
+
+        // undo our damage
+        result.side_to_move = !result.side_to_move;
+        result.update_pin_info();
+
         Some(result)
     }
 
@@ -534,7 +547,7 @@ impl Board {
     /// always give the same result back.
     ///
     /// ```
-    /// use bughouse_chess::{Board, Color};
+    /// use chess::{Board, Color};
     ///
     /// let board = Board::default();
     ///
@@ -546,12 +559,15 @@ impl Board {
     /// ```
     #[inline]
     pub fn null_move(&self) -> Option<Board> {
-        // In bughouse, null moves are always allowed (no check restriction).
-        let mut result = *self;
-        result.side_to_move = !result.side_to_move;
-        result.remove_ep();
-        result.update_pin_info();
-        Some(result)
+        if self.checkers != EMPTY {
+            None
+        } else {
+            let mut result = *self;
+            result.side_to_move = !result.side_to_move;
+            result.remove_ep();
+            result.update_pin_info();
+            Some(result)
+        }
     }
 
     /// Does this board "make sense"?
@@ -559,7 +575,7 @@ impl Board {
     /// This is for sanity checking.
     ///
     /// ```
-    /// use bughouse_chess::{Board, Color, Piece, Square};
+    /// use chess::{Board, Color, Piece, Square};
     ///
     /// let board = Board::default();
     ///
@@ -620,8 +636,13 @@ impl Board {
             }
         }
 
-        // In bughouse, the opponent CAN be in check when it's your turn
-        // (you chose not to escape), so we skip that validation.
+        // make sure my opponent is not currently in check (because that would be illegal)
+        let mut board_copy = *self;
+        board_copy.side_to_move = !board_copy.side_to_move;
+        board_copy.update_pin_info();
+        if board_copy.checkers != EMPTY {
+            return false;
+        }
 
         // for each color, verify that, if they have castle rights, that they haven't moved their
         // rooks or king
@@ -649,14 +670,16 @@ impl Board {
             }
         }
 
-        // In bughouse, kings CAN be adjacent (king can move next to enemy king),
-        // so we skip the "kings aren't touching" check.
+        // we must make sure the kings aren't touching
+        if get_king_moves(self.king_square(Color::White)) & self.pieces(Piece::King) != EMPTY {
+            return false;
+        }
 
         // it checks out
         return true;
     }
 
-    /// Get a hash of the board, including reserves (for bughouse position identity).
+    /// Get a hash of the board.
     #[inline]
     pub fn get_hash(&self) -> u64 {
         self.hash
@@ -678,32 +701,6 @@ impl Board {
             } else {
                 0
             }
-            ^ self.reserve_hash()
-    }
-
-    /// Compute a hash contribution from reserve state.
-    /// Uses simple mixing so same board + different reserves = different hash.
-    fn reserve_hash(&self) -> u64 {
-        // Use a set of prime multipliers for deterministic hashing of reserve counts.
-        // This doesn't need to be in a Zobrist table since reserves change rarely.
-        const PRIMES: [[u64; 5]; 2] = [
-            // White: Pawn, Knight, Bishop, Rook, Queen
-            [0x9E3779B97F4A7C15, 0x6C62272E07BB0142, 0x94D049BB133111EB,
-             0xBF58476D1CE4E5B9, 0xD6E8FEB86659FD93],
-            // Black: Pawn, Knight, Bishop, Rook, Queen
-            [0x4BE98134A5E5D9A1, 0xC42E9F2D28F50A31, 0x7C3D8F5B12A3E6C9,
-             0xE97E4BF8B9A2D3F5, 0x2A6B5D9F3C1E8A47],
-        ];
-        let mut h: u64 = 0;
-        for color_idx in 0..2 {
-            let reserve = &self.reserves[color_idx];
-            let pieces = [Piece::Pawn, Piece::Knight, Piece::Bishop, Piece::Rook, Piece::Queen];
-            for (i, piece) in pieces.iter().enumerate() {
-                let count = reserve.count(*piece) as u64;
-                h ^= count.wrapping_mul(PRIMES[color_idx][i]);
-            }
-        }
-        h
     }
 
     /// Get a pawn hash of the board (a hash that only changes on color change and pawn moves).
@@ -717,7 +714,7 @@ impl Board {
     /// What piece is on a particular `Square`?  Is there even one?
     ///
     /// ```
-    /// use bughouse_chess::{Board, Piece, Square};
+    /// use chess::{Board, Piece, Square};
     ///
     /// let board = Board::default();
     ///
@@ -780,7 +777,7 @@ impl Board {
     /// Give me the en_passant square, if it exists.
     ///
     /// ```
-    /// use bughouse_chess::{Board, ChessMove, Square};
+    /// use chess::{Board, ChessMove, Square};
     ///
     /// let move1 = ChessMove::new(Square::D2,
     ///                            Square::D4,
@@ -810,32 +807,6 @@ impl Board {
         self.en_passant
     }
 
-    /// Get the reserve for a particular color.
-    #[inline]
-    pub fn reserves(&self, color: Color) -> &Reserve {
-        unsafe { &self.reserves.get_unchecked(color.to_index()) }
-    }
-
-    /// Get the promoted bitboard (squares containing promoted pieces).
-    #[inline]
-    pub fn promoted(&self) -> &BitBoard {
-        &self.promoted
-    }
-
-    /// Is the piece on this square a promoted piece?
-    #[inline]
-    pub fn is_promoted(&self, square: Square) -> bool {
-        self.promoted & BitBoard::from_square(square) != EMPTY
-    }
-
-    /// Add a piece to a color's reserve.
-    #[inline]
-    pub fn add_to_reserve(&mut self, color: Color, piece: Piece) {
-        unsafe {
-            self.reserves.get_unchecked_mut(color.to_index()).add(piece);
-        }
-    }
-
     /// Set the en_passant square.  Note: This must only be called when self.en_passant is already
     /// None.
     fn set_ep(&mut self, sq: Square) {
@@ -854,7 +825,7 @@ impl Board {
     /// input.
     ///
     /// ```
-    /// use bughouse_chess::{Board, ChessMove, Square, MoveGen};
+    /// use chess::{Board, ChessMove, Square, MoveGen};
     ///
     /// let move1 = ChessMove::new(Square::E2,
     ///                            Square::E4,
@@ -879,7 +850,7 @@ impl Board {
     /// panic!() if king is captured.
     ///
     /// ```
-    /// use bughouse_chess::{Board, ChessMove, Square, Color};
+    /// use chess::{Board, ChessMove, Square, Color};
     ///
     /// let m = ChessMove::new(Square::D2,
     ///                        Square::D4,
@@ -1009,7 +980,7 @@ impl Board {
     /// panic!() if king is captured.
     ///
     /// ```
-    /// use bughouse_chess::{Board, ChessMove, Square, Color};
+    /// use chess::{Board, ChessMove, Square, Color};
     ///
     /// let m = ChessMove::new(Square::D2,
     ///                        Square::D4,
@@ -1135,129 +1106,6 @@ impl Board {
         result.side_to_move = !result.side_to_move;
     }
 
-    /// Make a move and return (new_board, captured_piece_info).
-    ///
-    /// `captured_piece_info` is `Some((piece, was_promoted))` if a piece was captured.
-    /// In bughouse, promoted pieces demote to pawns when captured, so callers should
-    /// check `was_promoted` and add a Pawn (not the captured piece type) to the partner's reserve.
-    #[inline]
-    pub fn make_move_with_capture(&self, m: ChessMove) -> (Board, Option<(Piece, bool)>) {
-        let dest = m.get_dest();
-        let source = m.get_source();
-
-        // Determine what was captured before making the move
-        let captured_info = if let Some(captured_piece) = self.piece_on(dest) {
-            let was_promoted = self.is_promoted(dest);
-            Some((captured_piece, was_promoted))
-        } else if self.piece_on(source) == Some(Piece::Pawn)
-            && source.get_file() != dest.get_file()
-            && self.piece_on(dest).is_none()
-        {
-            // En passant capture
-            Some((Piece::Pawn, false))
-        } else {
-            None
-        };
-
-        let mut new_board = self.make_move_new(m);
-
-        // Track promoted pieces through moves
-        let source_bb = BitBoard::from_square(source);
-        let dest_bb = BitBoard::from_square(dest);
-
-        // Clear promoted bit on captured square (piece was taken off)
-        new_board.promoted &= !dest_bb;
-
-        // If the moved piece was promoted, carry the bit to dest
-        if self.promoted & source_bb != EMPTY {
-            // Clear old position (already cleared by move)
-            new_board.promoted &= !source_bb;
-            // Set new position (unless it's a pawn that can't be promoted — shouldn't happen)
-            new_board.promoted |= dest_bb;
-        }
-
-        // If this is a pawn promotion, mark the destination as promoted
-        if self.piece_on(source) == Some(Piece::Pawn) && m.get_promotion().is_some() {
-            new_board.promoted |= dest_bb;
-        }
-
-        (new_board, captured_info)
-    }
-
-    /// Place a piece from reserves onto an empty square.
-    ///
-    /// Returns `Some(new_board)` if the drop is legal, `None` otherwise.
-    /// A drop is legal when:
-    /// - The square is empty
-    /// - The piece is in the side_to_move's reserves
-    /// - Pawns cannot be dropped on rank 1 or rank 8
-    /// - Kings cannot be dropped
-    pub fn make_drop_new(&self, piece: Piece, square: Square) -> Option<Board> {
-        // Cannot drop a king
-        if piece == Piece::King {
-            return None;
-        }
-
-        // Square must be empty
-        if self.combined() & BitBoard::from_square(square) != EMPTY {
-            return None;
-        }
-
-        // Pawns cannot be dropped on rank 1 or 8
-        if piece == Piece::Pawn
-            && (square.get_rank() == Rank::First || square.get_rank() == Rank::Eighth)
-        {
-            return None;
-        }
-
-        // Must have the piece in reserves
-        let color = self.side_to_move;
-        if self.reserves[color.to_index()].count(piece) == 0 {
-            return None;
-        }
-
-        let mut result = *self;
-        result.remove_ep();
-        result.checkers = EMPTY;
-        result.pinned = EMPTY;
-
-        // Remove piece from reserves
-        result.reserves[color.to_index()].remove(piece);
-
-        // Place piece on the board
-        let square_bb = BitBoard::from_square(square);
-        result.xor(piece, square_bb, color);
-
-        // Update check/pin info for the new position
-        let ksq = (result.pieces(Piece::King) & result.color_combined(!result.side_to_move)).to_square();
-
-        // Check if the dropped piece gives check
-        if piece == Piece::Knight {
-            result.checkers ^= get_knight_moves(ksq) & square_bb;
-        } else if piece == Piece::Pawn {
-            result.checkers ^= get_pawn_attacks(ksq, !result.side_to_move, square_bb);
-        }
-
-        // Check for sliding piece checks and pins
-        let attackers = result.color_combined(result.side_to_move)
-            & ((get_bishop_rays(ksq)
-                & (result.pieces(Piece::Bishop) | result.pieces(Piece::Queen)))
-                | (get_rook_rays(ksq)
-                    & (result.pieces(Piece::Rook) | result.pieces(Piece::Queen))));
-
-        for sq in attackers {
-            let between = between(sq, ksq) & result.combined();
-            if between == EMPTY {
-                result.checkers ^= BitBoard::from_square(sq);
-            } else if between.popcnt() == 1 {
-                result.pinned ^= between;
-            }
-        }
-
-        result.side_to_move = !result.side_to_move;
-        Some(result)
-    }
-
     /// Update the pin information.
     fn update_pin_info(&mut self) {
         self.pinned = EMPTY;
@@ -1333,10 +1181,6 @@ impl TryFrom<&BoardBuilder> for Board {
         board.add_castle_rights(Color::White, fen.get_castle_rights(Color::White));
         #[allow(deprecated)]
         board.add_castle_rights(Color::Black, fen.get_castle_rights(Color::Black));
-
-        // Copy reserves and promoted from the builder
-        board.reserves = fen.get_reserves();
-        board.promoted = fen.get_promoted();
 
         board.update_pin_info();
 

@@ -61,7 +61,7 @@ impl<T: Copy + Clone + PartialEq + PartialOrd> CacheTable<T> {
     /// a hash collision with `hash`.
     ///
     /// ```
-    /// use bughouse_chess::CacheTable;
+    /// use chess::CacheTable;
     ///
     /// # fn main() {
     ///

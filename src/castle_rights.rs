@@ -122,7 +122,7 @@ impl CastleRights {
     /// Convert the castle rights to an FEN compatible string.
     ///
     /// ```
-    /// use bughouse_chess::{CastleRights, Color};
+    /// use chess::{CastleRights, Color};
     ///
     /// assert_eq!(CastleRights::NoRights.to_string(Color::White), "");
     /// assert_eq!(CastleRights::Both.to_string(Color::Black), "kq");

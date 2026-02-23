@@ -1,21 +1,19 @@
-//! # Bughouse Chess Library
-//! A move generation library for bughouse chess, forked from jordanbray/chess.
-//!
-//! Bughouse is a 2v2 chess variant where captured pieces transfer to your partner's
-//! reserve and can be dropped onto empty squares. Key rule differences from standard chess:
-//! - King CAN move into/through check (no check concept restricting moves)
-//! - King capture = game over (not checkmate)
-//! - Pieces from reserve can be dropped onto empty squares (pawns not on rank 1/8)
-//! - Promoted pieces demote to pawns when captured
+#![doc(html_root_url = "https://jordanbray.github.io/chess/")]
+//! # Rust Chess Library
+//! This is a chess move generation library for rust.  It is designed to be fast, so that it can be
+//! used in a chess engine or UI without performance issues.
 //!
 //! ## Example
 //!
+//! This generates all the moves on the starting chess position, and checks that the number of
+//! moves is correct.
+//!
 //! ```
-//! use bughouse_chess::{Board, MoveGen};
+//!
+//! use chess::{Board, MoveGen};
 //!
 //! let board = Board::default();
 //! let movegen = MoveGen::new_legal(&board);
-//! // Starting position has 20 moves (same as standard chess)
 //! assert_eq!(movegen.len(), 20);
 //! ```
 //!
@@ -76,9 +74,3 @@ pub use crate::board_builder::BoardBuilder;
 
 mod error;
 pub use crate::error::Error;
-
-mod reserve;
-pub use crate::reserve::*;
-
-mod bughouse_move;
-pub use crate::bughouse_move::*;

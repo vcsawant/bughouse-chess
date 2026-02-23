@@ -6,8 +6,9 @@ use crate::piece::Piece;
 use crate::square::Square;
 
 use crate::magic::{
-    get_adjacent_files, get_bishop_moves, get_bishop_rays, get_king_moves, get_knight_moves,
-    get_pawn_attacks, get_pawn_moves, get_rank, get_rook_moves, get_rook_rays,
+    between, get_adjacent_files, get_bishop_moves, get_bishop_rays, get_king_moves,
+    get_knight_moves, get_pawn_attacks, get_pawn_moves, get_rank, get_rook_moves, get_rook_rays,
+    line,
 };
 
 pub trait PieceType {
@@ -15,11 +16,6 @@ pub trait PieceType {
     fn into_piece() -> Piece;
     #[inline(always)]
     fn pseudo_legals(src: Square, color: Color, combined: BitBoard, mask: BitBoard) -> BitBoard;
-    /// Generate all pseudo-legal moves for this piece type.
-    ///
-    /// In bughouse, there are no pin or check restrictions on piece movement
-    /// (king can move into check, pieces can move while pinned), so we generate
-    /// all pseudo-legal moves without filtering.
     #[inline(always)]
     fn legals<T>(movelist: &mut MoveList, board: &Board, mask: BitBoard)
     where
@@ -28,15 +24,34 @@ pub trait PieceType {
         let combined = board.combined();
         let color = board.side_to_move();
         let my_pieces = board.color_combined(color);
+        let ksq = board.king_square(color);
 
         let pieces = board.pieces(Self::into_piece()) & my_pieces;
+        let pinned = board.pinned();
+        let checkers = board.checkers();
 
-        // In bughouse: no pin/check filtering. All pieces can move freely.
-        for src in pieces {
-            let moves = Self::pseudo_legals(src, color, *combined, mask);
+        let check_mask = if T::IN_CHECK {
+            between(checkers.to_square(), ksq) ^ checkers
+        } else {
+            !EMPTY
+        };
+
+        for src in pieces & !pinned {
+            let moves = Self::pseudo_legals(src, color, *combined, mask) & check_mask;
             if moves != EMPTY {
                 unsafe {
                     movelist.push_unchecked(SquareAndBitBoard::new(src, moves, false));
+                }
+            }
+        }
+
+        if !T::IN_CHECK {
+            for src in pieces & pinned {
+                let moves = Self::pseudo_legals(src, color, *combined, mask) & line(src, ksq);
+                if moves != EMPTY {
+                    unsafe {
+                        movelist.push_unchecked(SquareAndBitBoard::new(src, moves, false));
+                    }
                 }
             }
         }
@@ -120,12 +135,20 @@ impl PieceType for PawnType {
         let combined = board.combined();
         let color = board.side_to_move();
         let my_pieces = board.color_combined(color);
+        let ksq = board.king_square(color);
 
         let pieces = board.pieces(Self::into_piece()) & my_pieces;
+        let pinned = board.pinned();
+        let checkers = board.checkers();
 
-        // In bughouse: no pin/check filtering for pawns.
-        for src in pieces {
-            let moves = Self::pseudo_legals(src, color, *combined, mask);
+        let check_mask = if T::IN_CHECK {
+            between(checkers.to_square(), ksq) ^ checkers
+        } else {
+            !EMPTY
+        };
+
+        for src in pieces & !pinned {
+            let moves = Self::pseudo_legals(src, color, *combined, mask) & check_mask;
             if moves != EMPTY {
                 unsafe {
                     movelist.push_unchecked(SquareAndBitBoard::new(
@@ -137,19 +160,35 @@ impl PieceType for PawnType {
             }
         }
 
-        // En passant: always legal in bughouse (no pin check needed).
+        if !T::IN_CHECK {
+            for src in pieces & pinned {
+                let moves = Self::pseudo_legals(src, color, *combined, mask) & line(ksq, src);
+                if moves != EMPTY {
+                    unsafe {
+                        movelist.push_unchecked(SquareAndBitBoard::new(
+                            src,
+                            moves,
+                            src.get_rank() == color.to_seventh_rank(),
+                        ));
+                    }
+                }
+            }
+        }
+
         if board.en_passant().is_some() {
             let ep_sq = board.en_passant().unwrap();
             let rank = get_rank(ep_sq.get_rank());
             let files = get_adjacent_files(ep_sq.get_file());
             for src in rank & files & pieces {
                 let dest = ep_sq.uforward(color);
-                unsafe {
-                    movelist.push_unchecked(SquareAndBitBoard::new(
-                        src,
-                        BitBoard::from_square(dest),
-                        false,
-                    ));
+                if PawnType::legal_ep_move(board, src, dest) {
+                    unsafe {
+                        movelist.push_unchecked(SquareAndBitBoard::new(
+                            src,
+                            BitBoard::from_square(dest),
+                            false,
+                        ));
+                    }
                 }
             }
         }
@@ -185,7 +224,42 @@ impl PieceType for KnightType {
         get_knight_moves(src) & mask
     }
 
-    // Knights use the default legals implementation (no pin/check filtering in bughouse).
+    #[inline(always)]
+    fn legals<T>(movelist: &mut MoveList, board: &Board, mask: BitBoard)
+    where
+        T: CheckType,
+    {
+        let combined = board.combined();
+        let color = board.side_to_move();
+        let my_pieces = board.color_combined(color);
+        let ksq = board.king_square(color);
+
+        let pieces = board.pieces(Self::into_piece()) & my_pieces;
+        let pinned = board.pinned();
+        let checkers = board.checkers();
+
+        if T::IN_CHECK {
+            let check_mask = between(checkers.to_square(), ksq) ^ checkers;
+
+            for src in pieces & !pinned {
+                let moves = Self::pseudo_legals(src, color, *combined, mask & check_mask);
+                if moves != EMPTY {
+                    unsafe {
+                        movelist.push_unchecked(SquareAndBitBoard::new(src, moves, false));
+                    }
+                }
+            }
+        } else {
+            for src in pieces & !pinned {
+                let moves = Self::pseudo_legals(src, color, *combined, mask);
+                if moves != EMPTY {
+                    unsafe {
+                        movelist.push_unchecked(SquareAndBitBoard::new(src, moves, false));
+                    }
+                }
+            }
+        };
+    }
 }
 
 impl PieceType for RookType {
@@ -270,12 +344,6 @@ impl PieceType for KingType {
         get_king_moves(src) & mask
     }
 
-    /// Generate all king moves for bughouse.
-    ///
-    /// In bughouse, the king can move to ANY square not occupied by own pieces,
-    /// including squares attacked by the opponent. Castling is allowed regardless
-    /// of check status, and the king can castle through attacked squares.
-    /// Only requirement for castling: squares between king and rook must be empty.
     #[inline(always)]
     fn legals<T>(movelist: &mut MoveList, board: &Board, mask: BitBoard)
     where
@@ -285,25 +353,48 @@ impl PieceType for KingType {
         let color = board.side_to_move();
         let ksq = board.king_square(color);
 
-        // All pseudo-legal king moves (no attack filtering in bughouse)
         let mut moves = Self::pseudo_legals(ksq, color, *combined, mask);
 
-        // Castling: allowed even when in check, and through attacked squares.
-        // Only check: castle rights exist and squares between king and rook are empty.
-        if board.my_castle_rights().has_kingside()
-            && (combined & board.my_castle_rights().kingside_squares(color)) == EMPTY
-        {
-            let right = ksq.uright().uright();
-            moves ^= BitBoard::from_square(right);
+        let copy = moves;
+        for dest in copy {
+            if !KingType::legal_king_move(board, dest) {
+                moves ^= BitBoard::from_square(dest);
+            }
         }
 
-        if board.my_castle_rights().has_queenside()
-            && (combined & board.my_castle_rights().queenside_squares(color)) == EMPTY
-        {
-            let left = ksq.uleft().uleft();
-            moves ^= BitBoard::from_square(left);
-        }
+        // If we are not in check, we may be able to castle.
+        // We can do so iff:
+        //  * the `Board` structure says we can.
+        //  * the squares between my king and my rook are empty.
+        //  * no enemy pieces are attacking the squares between the king, and the kings
+        //    destination square.
+        //  ** This is determined by going to the left or right, and calling
+        //     'legal_king_move' for that square.
+        if !T::IN_CHECK {
+            if board.my_castle_rights().has_kingside()
+                && (combined & board.my_castle_rights().kingside_squares(color)) == EMPTY
+            {
+                let middle = ksq.uright();
+                let right = middle.uright();
+                if KingType::legal_king_move(board, middle)
+                    && KingType::legal_king_move(board, right)
+                {
+                    moves ^= BitBoard::from_square(right);
+                }
+            }
 
+            if board.my_castle_rights().has_queenside()
+                && (combined & board.my_castle_rights().queenside_squares(color)) == EMPTY
+            {
+                let middle = ksq.uleft();
+                let left = middle.uleft();
+                if KingType::legal_king_move(board, middle)
+                    && KingType::legal_king_move(board, left)
+                {
+                    moves ^= BitBoard::from_square(left);
+                }
+            }
+        }
         if moves != EMPTY {
             unsafe {
                 movelist.push_unchecked(SquareAndBitBoard::new(ksq, moves, false));

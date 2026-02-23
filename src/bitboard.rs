@@ -9,7 +9,7 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, M
 /// using the implemented operators to work with this object.
 ///
 /// ```
-/// use bughouse_chess::{BitBoard, Square};
+/// use chess::{BitBoard, Square};
 ///
 /// let bb = BitBoard(7); // lower-left 3 squares
 ///
@@ -29,7 +29,7 @@ pub struct BitBoard(pub u64);
 /// An empty bitboard.  It is sometimes useful to use !EMPTY to get the universe of squares.
 ///
 /// ```
-///     use bughouse_chess::EMPTY;
+///     use chess::EMPTY;
 ///
 ///     assert_eq!(EMPTY.count(), 0);
 ///
