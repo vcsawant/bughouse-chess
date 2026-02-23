@@ -13,7 +13,7 @@ license = "MIT"
 [dependencies]
 arrayvec = "0.7.2"
 nodrop = "0.1.14"
-failure = "0.1.6"
+thiserror = "2"
 
 [profile.release]
 opt-level = 3
@@ -36,4 +36,4 @@ opt-level = 3
 
 [build-dependencies]
 rand = { version = "0.7.2", default_features = false, features = ["small_rng"] }
-failure = "0.1.6"
+thiserror = "2"
