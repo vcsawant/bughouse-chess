@@ -1,7 +1,9 @@
 #![doc(html_root_url = "https://jordanbray.github.io/chess/")]
-//! # Rust Chess Library
-//! This is a chess move generation library for rust.  It is designed to be fast, so that it can be
-//! used in a chess engine or UI without performance issues.
+//! # Bughouse Chess Library
+//! This is a bughouse chess move generation library for rust, based on the chess crate.
+//! It supports standard chess legality (pins, check evasion, castling restrictions) plus
+//! bughouse-specific features: reserves, piece drops, BFEN notation, promoted piece tracking,
+//! and drop-aware checkmate detection.
 //!
 //! ## Example
 //!
@@ -10,7 +12,7 @@
 //!
 //! ```
 //!
-//! use chess::{Board, MoveGen};
+//! use bughouse_chess::{Board, MoveGen};
 //!
 //! let board = Board::default();
 //! let movegen = MoveGen::new_legal(&board);
@@ -74,3 +76,9 @@ pub use crate::board_builder::BoardBuilder;
 
 mod error;
 pub use crate::error::Error;
+
+mod reserve;
+pub use crate::reserve::*;
+
+mod bughouse_move;
+pub use crate::bughouse_move::*;
