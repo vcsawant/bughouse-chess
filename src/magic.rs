@@ -87,6 +87,16 @@ pub fn get_king_moves(sq: Square) -> BitBoard {
     unsafe { *KING_MOVES.get_unchecked(sq.to_index()) }
 }
 
+/// Get the 2-ring king zone for a particular square.
+///
+/// Returns a `BitBoard` covering all squares within 2 king moves of `sq`.
+/// This is the union of the king's immediate neighbors (ring 1) and their
+/// neighbors (ring 2). Useful for drop target pruning and king safety.
+#[inline]
+pub fn get_king_zone(sq: Square) -> BitBoard {
+    unsafe { *KING_ZONE.get_unchecked(sq.to_index()) }
+}
+
 /// Get the knight moves for a particular square.
 #[inline]
 pub fn get_knight_moves(sq: Square) -> BitBoard {
@@ -102,6 +112,17 @@ pub fn get_pawn_attacks(sq: Square, color: Color, blockers: BitBoard) -> BitBoar
             .get_unchecked(color.to_index())
             .get_unchecked(sq.to_index())
             & blockers
+    }
+}
+
+/// Get the raw pawn attack squares for a particular square and color, without filtering
+/// by blockers. Useful for computing attack maps.
+#[inline]
+pub fn get_pawn_attack_squares(sq: Square, color: Color) -> BitBoard {
+    unsafe {
+        *PAWN_ATTACKS
+            .get_unchecked(color.to_index())
+            .get_unchecked(sq.to_index())
     }
 }
 /// Get the legal destination castle squares for both players
@@ -170,6 +191,17 @@ pub fn get_file(file: File) -> BitBoard {
 #[inline]
 pub fn get_adjacent_files(file: File) -> BitBoard {
     unsafe { *ADJACENT_FILES.get_unchecked(file.to_index()) }
+}
+
+/// Get a `BitBoard` covering the same file + adjacent files on all ranks ahead of `sq`
+/// for the given `color`. Used for O(1) passed pawn detection.
+#[inline]
+pub fn get_forward_file_mask(sq: Square, color: Color) -> BitBoard {
+    unsafe {
+        *FORWARD_FILE_MASK
+            .get_unchecked(color.to_index())
+            .get_unchecked(sq.to_index())
+    }
 }
 
 #[inline]

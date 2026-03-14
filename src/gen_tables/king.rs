@@ -8,6 +8,9 @@ use crate::square::{Square, ALL_SQUARES};
 
 // Given a square, what are the valid king moves?
 static mut KING_MOVES: [BitBoard; 64] = [EMPTY; 64];
+// Given a square, what is the 2-ring zone around it? (king moves + one more ring out)
+// Useful for drop target pruning and king safety evaluation.
+static mut KING_ZONE: [BitBoard; 64] = [EMPTY; 64];
 static mut KINGSIDE_CASTLE_SQUARES: [BitBoard; 2] = [EMPTY; 2];
 static mut QUEENSIDE_CASTLE_SQUARES: [BitBoard; 2] = [EMPTY; 2];
 
@@ -33,6 +36,26 @@ pub fn gen_king_moves() {
 
     gen_kingside_castle_squares();
     gen_queenside_castle_squares();
+}
+
+// Generate the KING_ZONE array (must be called after gen_king_moves).
+// For each square, the zone is the union of ring-1 (king moves) and ring-2
+// (king moves from each ring-1 square).
+pub fn gen_king_zone() {
+    for src in ALL_SQUARES.iter() {
+        unsafe {
+            let ring1 = KING_MOVES[src.to_index()];
+            let mut ring2 = EMPTY;
+            // Iterate over ring1 squares and union their king moves
+            let mut remaining = ring1;
+            while remaining != EMPTY {
+                let sq = remaining.to_square();
+                ring2 |= KING_MOVES[sq.to_index()];
+                remaining ^= BitBoard::from_square(sq);
+            }
+            KING_ZONE[src.to_index()] = ring1 | ring2;
+        }
+    }
 }
 
 fn gen_kingside_castle_squares() {
@@ -65,11 +88,17 @@ fn gen_castle_moves() -> BitBoard {
         ^ BitBoard::from_square(Square::G8)
 }
 
-// Write the KING_MOVES array to the specified file.
+// Write the KING_MOVES and KING_ZONE arrays to the specified file.
 pub fn write_king_moves(f: &mut File) {
     write!(f, "const KING_MOVES: [BitBoard; 64] = [\n").unwrap();
     for i in 0..64 {
         unsafe { write!(f, "    BitBoard({}),\n", KING_MOVES[i].0).unwrap() };
+    }
+    write!(f, "];\n").unwrap();
+
+    write!(f, "const KING_ZONE: [BitBoard; 64] = [\n").unwrap();
+    for i in 0..64 {
+        unsafe { write!(f, "    BitBoard({}),\n", KING_ZONE[i].0).unwrap() };
     }
     write!(f, "];\n").unwrap();
 

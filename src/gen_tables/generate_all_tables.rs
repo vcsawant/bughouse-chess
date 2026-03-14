@@ -31,6 +31,7 @@ pub fn generate_all_tables() {
     gen_rook_rays();
     gen_knight_moves();
     gen_king_moves();
+    gen_king_zone();
     gen_pawn_attacks();
     gen_pawn_moves();
     gen_all_magic();

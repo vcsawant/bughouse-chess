@@ -25,6 +25,18 @@ pub const ALL_PIECES: [Piece; NUM_PIECES] = [
     Piece::King,
 ];
 
+/// How many non-king piece types are there? (Pawn, Knight, Bishop, Rook, Queen)
+pub const NUM_NON_KING_PIECES: usize = 5;
+
+/// All non-king piece types, in order of ascending value.
+pub const NON_KING_PIECES: [Piece; NUM_NON_KING_PIECES] = [
+    Piece::Pawn,
+    Piece::Knight,
+    Piece::Bishop,
+    Piece::Rook,
+    Piece::Queen,
+];
+
 /// How many ways can I promote?
 pub const NUM_PROMOTION_PIECES: usize = 4;
 
@@ -36,6 +48,16 @@ impl Piece {
     #[inline]
     pub fn to_index(&self) -> usize {
         *self as usize
+    }
+
+    /// Get the index for non-king pieces (Pawn=0, Knight=1, Bishop=2, Rook=3, Queen=4).
+    /// Returns `None` for King.
+    #[inline]
+    pub fn non_king_index(&self) -> Option<usize> {
+        match *self {
+            Piece::King => None,
+            p => Some(p as usize),
+        }
     }
 
     /// Convert a piece with a color to a string.  White pieces are uppercase, black pieces are

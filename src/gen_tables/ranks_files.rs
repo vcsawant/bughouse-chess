@@ -7,22 +7,23 @@ use crate::rank::Rank;
 use crate::square::ALL_SQUARES;
 
 // Given a rank, what squares are on that rank?
-// This will be generated here, and then put into the magic_gen.rs as a const array.
 static mut RANKS: [BitBoard; 8] = [EMPTY; 8];
 
 // Given a file, what squares are on that file?
-// This will be generated here, and then put into the magic_gen.rs as a const array.
 static mut FILES: [BitBoard; 8] = [EMPTY; 8];
 
 // Given a file, what squares are adjacent to that file?  Useful for detecting passed pawns.
-// This will be generated here, and then put into the magic_gen.rs as a const array.
 static mut ADJACENT_FILES: [BitBoard; 8] = [EMPTY; 8];
 
 // What are the EDGES of the board?
-// This will be generated here, and then put into the magic_gen.rs as a const array.
 static mut EDGES: BitBoard = EMPTY;
 
-// Generate the EDGES, RANKS, FILES, and ADJACENT_FILES variables for storage in the
+// Given a color and square, what squares are on the same + adjacent files ahead?
+// Indexed by [color][square]. Used for passed pawn detection in O(1).
+// Color: 0 = White (ranks ahead = higher), 1 = Black (ranks ahead = lower).
+static mut FORWARD_FILE_MASK: [[BitBoard; 64]; 2] = [[EMPTY; 64]; 2];
+
+// Generate the EDGES, RANKS, FILES, ADJACENT_FILES, and FORWARD_FILE_MASK variables.
 pub fn gen_bitboard_data() {
     unsafe {
         EDGES = ALL_SQUARES
@@ -50,6 +51,29 @@ pub fn gen_bitboard_data() {
                         || ((y.get_file().to_index() as i8) == (i as i8) + 1)
                 })
                 .fold(EMPTY, |v, s| v | BitBoard::from_square(*s));
+        }
+
+        // Generate FORWARD_FILE_MASK[color][square]
+        // For each square and color, the mask covers the same file + adjacent files
+        // on all ranks ahead of the square (not including the square's own rank).
+        for sq in ALL_SQUARES.iter() {
+            let file = sq.get_file().to_index();
+            let rank = sq.get_rank().to_index();
+            let file_mask = FILES[file] | ADJACENT_FILES[file];
+
+            // White (color index 0): ranks ahead = higher rank indices
+            let mut white_ahead = EMPTY;
+            for r in (rank + 1)..8 {
+                white_ahead |= RANKS[r];
+            }
+            FORWARD_FILE_MASK[0][sq.to_index()] = file_mask & white_ahead;
+
+            // Black (color index 1): ranks ahead = lower rank indices
+            let mut black_ahead = EMPTY;
+            for r in 0..rank {
+                black_ahead |= RANKS[r];
+            }
+            FORWARD_FILE_MASK[1][sq.to_index()] = file_mask & black_ahead;
         }
     }
 }
@@ -79,5 +103,14 @@ pub fn write_bitboard_data(f: &mut File) {
             EDGES.0
         )
         .unwrap();
+        write!(f, "const FORWARD_FILE_MASK: [[BitBoard; 64]; 2] = [\n").unwrap();
+        for color in 0..2 {
+            write!(f, "    [\n").unwrap();
+            for sq in 0..64 {
+                write!(f, "        BitBoard({}),\n", FORWARD_FILE_MASK[color][sq].0).unwrap();
+            }
+            write!(f, "    ],\n").unwrap();
+        }
+        write!(f, "];\n").unwrap();
     }
 }

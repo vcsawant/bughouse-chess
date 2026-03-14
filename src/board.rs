@@ -1289,6 +1289,66 @@ impl Board {
 
         Some(result)
     }
+
+    /// Check if a pawn on `sq` of `color` is a passed pawn (no opponent pawns
+    /// on the same or adjacent files ahead).
+    #[inline]
+    pub fn is_passed_pawn(&self, sq: Square, color: Color) -> bool {
+        use crate::magic::get_forward_file_mask;
+        let opp_pawns = *self.pieces(Piece::Pawn) & *self.color_combined(!color);
+        (opp_pawns & get_forward_file_mask(sq, color)) == EMPTY
+    }
+
+    /// Compute the union of all pseudo-legal attack squares for all pieces of `color`.
+    /// Does not include pawn pushes — only captures/attacks.
+    pub fn attacks_by(&self, color: Color) -> BitBoard {
+        use crate::magic::{
+            get_bishop_moves, get_king_moves, get_knight_moves, get_pawn_attack_squares,
+            get_rook_moves,
+        };
+
+        let my_pieces = *self.color_combined(color);
+        let blockers = *self.combined();
+        let mut attacks = EMPTY;
+
+        // Pawns
+        let mut pawns = *self.pieces(Piece::Pawn) & my_pieces;
+        while pawns != EMPTY {
+            let sq = pawns.to_square();
+            attacks |= get_pawn_attack_squares(sq, color);
+            pawns ^= BitBoard::from_square(sq);
+        }
+
+        // Knights
+        let mut knights = *self.pieces(Piece::Knight) & my_pieces;
+        while knights != EMPTY {
+            let sq = knights.to_square();
+            attacks |= get_knight_moves(sq);
+            knights ^= BitBoard::from_square(sq);
+        }
+
+        // Bishops + Queens (diagonal)
+        let mut diag = (*self.pieces(Piece::Bishop) | *self.pieces(Piece::Queen)) & my_pieces;
+        while diag != EMPTY {
+            let sq = diag.to_square();
+            attacks |= get_bishop_moves(sq, blockers);
+            diag ^= BitBoard::from_square(sq);
+        }
+
+        // Rooks + Queens (orthogonal)
+        let mut orth = (*self.pieces(Piece::Rook) | *self.pieces(Piece::Queen)) & my_pieces;
+        while orth != EMPTY {
+            let sq = orth.to_square();
+            attacks |= get_rook_moves(sq, blockers);
+            orth ^= BitBoard::from_square(sq);
+        }
+
+        // King
+        let king_sq = (self.pieces(Piece::King) & my_pieces).to_square();
+        attacks |= get_king_moves(king_sq);
+
+        attacks
+    }
 }
 
 impl fmt::Display for Board {
