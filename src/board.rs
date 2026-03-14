@@ -1254,6 +1254,25 @@ impl Board {
             return None;
         }
 
+        // If king is in check, the drop must block the check to be legal.
+        // Drops cannot capture, so they can only block sliding piece checks.
+        // Knight/pawn checks and double checks cannot be resolved by drops.
+        let checkers = *self.checkers();
+        if checkers != EMPTY {
+            if checkers.popcnt() > 1 {
+                // Double check: only king moves resolve it, not drops
+                return None;
+            }
+            let checker_sq = checkers.to_square();
+            let king_sq =
+                (self.pieces(Piece::King) & self.color_combined(self.side_to_move)).to_square();
+            let block_squares = between(checker_sq, king_sq);
+            if (BitBoard::from_square(square) & block_squares) == EMPTY {
+                // Drop doesn't block the check (or check is from knight/pawn with no between squares)
+                return None;
+            }
+        }
+
         let mut result = *self;
         result.reserves[color.to_index()].remove(piece);
         result.remove_ep();

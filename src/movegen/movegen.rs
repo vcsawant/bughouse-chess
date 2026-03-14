@@ -762,6 +762,57 @@ fn test_pawn_drop_on_back_rank_fails() {
 }
 
 #[test]
+fn test_drop_while_in_knight_check_fails() {
+    use crate::color::Color;
+    // Black king on e8, white knight on f6 gives check.
+    // Black has a pawn in reserve. Dropping p@d7 should be illegal
+    // because a knight check cannot be blocked by a drop.
+    let mut board: Board = BoardBuilder::from_str("4k3/8/5N2/8/8/8/8/4K3 b - - 0 1")
+        .unwrap()
+        .try_into()
+        .unwrap();
+    board.add_to_reserve(Color::Black, Piece::Pawn);
+    assert_ne!(*board.checkers(), EMPTY, "king should be in check from knight");
+    let result = board.make_drop_new(Piece::Pawn, Square::from_str("d7").unwrap());
+    assert!(result.is_none(), "drop should be illegal when in knight check");
+}
+
+#[test]
+fn test_drop_blocks_sliding_check() {
+    use crate::color::Color;
+    // Black king on e8, white rook on e1 gives check along e-file.
+    // Dropping p@e4 blocks the check → legal.
+    // Dropping p@d4 does NOT block the check → illegal.
+    let mut board: Board = BoardBuilder::from_str("4k3/8/8/8/8/8/8/K3R3 b - - 0 1")
+        .unwrap()
+        .try_into()
+        .unwrap();
+    board.add_to_reserve(Color::Black, Piece::Pawn);
+    assert_ne!(*board.checkers(), EMPTY, "king should be in check from rook on e1");
+    // Drop on e4 blocks the check (between e1 and e8)
+    let result = board.make_drop_new(Piece::Pawn, Square::from_str("e4").unwrap());
+    assert!(result.is_some(), "drop blocking rook check should be legal");
+    // Drop on d4 does NOT block the check
+    let result = board.make_drop_new(Piece::Pawn, Square::from_str("d4").unwrap());
+    assert!(result.is_none(), "drop not blocking check should be illegal");
+}
+
+#[test]
+fn test_drop_in_double_check_fails() {
+    use crate::color::Color;
+    // Black king in double check — no drop can resolve it.
+    // White knight on f6 + white rook on e1 both check black king on e8.
+    let mut board: Board = BoardBuilder::from_str("4k3/8/5N2/8/8/8/8/K3R3 b - - 0 1")
+        .unwrap()
+        .try_into()
+        .unwrap();
+    board.add_to_reserve(Color::Black, Piece::Queen);
+    assert!(board.checkers().popcnt() > 1, "should be double check");
+    let result = board.make_drop_new(Piece::Queen, Square::from_str("e4").unwrap());
+    assert!(result.is_none(), "drop should be illegal in double check");
+}
+
+#[test]
 fn test_capture_tracking() {
     use crate::color::Color;
     // Set up a position where white can capture a black pawn
