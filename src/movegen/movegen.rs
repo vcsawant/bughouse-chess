@@ -131,6 +131,16 @@ impl MoveGen {
         }
     }
 
+    /// Generate all legal capture moves for the current position.
+    /// Returns a `MoveGen` iterator filtered to only moves that land on
+    /// opponent-occupied squares.
+    pub fn capture_moves(board: &Board) -> MoveGen {
+        let mut movegen = MoveGen::new_legal(board);
+        let targets = *board.color_combined(!board.side_to_move());
+        movegen.set_iterator_mask(targets);
+        movegen
+    }
+
     /// Generate all legal drop moves from the current player's reserve.
     ///
     /// In check situations:
@@ -623,6 +633,24 @@ fn test_starting_position_moves() {
     let board = Board::default();
     let movegen = MoveGen::new_legal(&board);
     assert_eq!(movegen.len(), 20); // 16 pawn moves + 4 knight moves
+}
+
+#[test]
+fn test_capture_moves_startpos() {
+    let board = Board::default();
+    let captures: Vec<_> = MoveGen::capture_moves(&board).collect();
+    assert_eq!(captures.len(), 0, "no captures in starting position");
+}
+
+#[test]
+fn test_capture_moves_hanging_piece() {
+    // White knight on c3 can capture black bishop on d5
+    let board: Board = BoardBuilder::from_str("rn1qkbnr/pppppppp/8/3b4/8/2N5/PPPPPPPP/R1BQKBNR w KQkq - 0 1")
+        .expect("valid fen")
+        .try_into()
+        .expect("valid board");
+    let captures: Vec<_> = MoveGen::capture_moves(&board).collect();
+    assert!(captures.len() >= 1, "should find at least one capture, got {}", captures.len());
 }
 
 #[test]
