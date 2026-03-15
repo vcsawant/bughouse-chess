@@ -13,6 +13,77 @@ pub enum BughouseMove {
     Drop { piece: Piece, square: Square },
 }
 
+impl BughouseMove {
+    /// Compress to u16 for transposition table storage.
+    ///
+    /// Regular moves (bit 15 = 0): `[0][promo:3][dest:6][source:6]`
+    /// Drop moves (bit 15 = 1):    `[1][unused:6][piece:3][dest:6]`
+    ///
+    /// `0u16` represents "no move" (a1→a1, not a legal chess move).
+    #[inline]
+    pub fn compress(&self) -> u16 {
+        match self {
+            BughouseMove::Regular(cm) => {
+                let src = cm.get_source().to_int() as u16;
+                let dst = cm.get_dest().to_int() as u16;
+                let promo = match cm.get_promotion() {
+                    None => 0u16,
+                    Some(Piece::Queen) => 1,
+                    Some(Piece::Knight) => 2,
+                    Some(Piece::Rook) => 3,
+                    Some(Piece::Bishop) => 4,
+                    Some(_) => 0, // shouldn't happen
+                };
+                src | (dst << 6) | (promo << 12)
+            }
+            BughouseMove::Drop { piece, square } => {
+                let dst = square.to_int() as u16;
+                let pc = piece.to_index() as u16; // 0-4 for droppable pieces
+                (1 << 15) | dst | (pc << 6)
+            }
+        }
+    }
+
+    /// Decompress from u16. Returns `None` for invalid encoding or `0u16` (no move).
+    #[inline]
+    pub fn decompress(encoded: u16) -> Option<BughouseMove> {
+        if encoded == 0 {
+            return None;
+        }
+        if encoded & (1 << 15) != 0 {
+            // Drop move
+            let dst = (encoded & 0x3F) as u8;
+            let pc_idx = ((encoded >> 6) & 0x07) as usize;
+            let piece = Piece::from_index(pc_idx)?;
+            if piece == Piece::King {
+                return None; // can't drop a king
+            }
+            Some(BughouseMove::Drop {
+                piece,
+                square: Square::new(dst),
+            })
+        } else {
+            // Regular move
+            let src = (encoded & 0x3F) as u8;
+            let dst = ((encoded >> 6) & 0x3F) as u8;
+            let promo_bits = (encoded >> 12) & 0x07;
+            let promotion = match promo_bits {
+                0 => None,
+                1 => Some(Piece::Queen),
+                2 => Some(Piece::Knight),
+                3 => Some(Piece::Rook),
+                4 => Some(Piece::Bishop),
+                _ => return None,
+            };
+            Some(BughouseMove::Regular(ChessMove::new(
+                Square::new(src),
+                Square::new(dst),
+                promotion,
+            )))
+        }
+    }
+}
+
 impl fmt::Display for BughouseMove {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -113,5 +184,60 @@ mod tests {
         let original = "n@f3";
         let m: BughouseMove = original.parse().unwrap();
         assert_eq!(format!("{}", m), original);
+    }
+
+    #[test]
+    fn test_compress_regular_move() {
+        let m: BughouseMove = "e2e4".parse().unwrap();
+        let compressed = m.compress();
+        let decompressed = BughouseMove::decompress(compressed).unwrap();
+        assert_eq!(m, decompressed);
+    }
+
+    #[test]
+    fn test_compress_promotion() {
+        let m: BughouseMove = "e7e8q".parse().unwrap();
+        let compressed = m.compress();
+        let decompressed = BughouseMove::decompress(compressed).unwrap();
+        assert_eq!(m, decompressed);
+    }
+
+    #[test]
+    fn test_compress_castling() {
+        let m: BughouseMove = "e1g1".parse().unwrap();
+        let compressed = m.compress();
+        let decompressed = BughouseMove::decompress(compressed).unwrap();
+        assert_eq!(m, decompressed);
+    }
+
+    #[test]
+    fn test_compress_drop() {
+        let m: BughouseMove = "n@f3".parse().unwrap();
+        let compressed = m.compress();
+        let decompressed = BughouseMove::decompress(compressed).unwrap();
+        assert_eq!(m, decompressed);
+    }
+
+    #[test]
+    fn test_compress_queen_drop() {
+        let m: BughouseMove = "q@d5".parse().unwrap();
+        let compressed = m.compress();
+        let decompressed = BughouseMove::decompress(compressed).unwrap();
+        assert_eq!(m, decompressed);
+    }
+
+    #[test]
+    fn test_compress_no_move() {
+        assert!(BughouseMove::decompress(0).is_none());
+    }
+
+    #[test]
+    fn test_compress_all_promotions() {
+        for promo in ["q", "n", "r", "b"] {
+            let s = format!("e7e8{}", promo);
+            let m: BughouseMove = s.parse().unwrap();
+            let decompressed = BughouseMove::decompress(m.compress()).unwrap();
+            assert_eq!(m, decompressed, "failed for promotion {}", promo);
+        }
     }
 }

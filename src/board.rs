@@ -669,6 +669,31 @@ impl Board {
             ^ self.reserve_hash()
     }
 
+    /// Get a hash of the board excluding reserves.
+    /// Useful for transposition tables where reserve state is handled separately.
+    #[inline]
+    pub fn get_position_hash(&self) -> u64 {
+        self.hash
+            ^ if let Some(ep) = self.en_passant {
+                Zobrist::en_passant(ep.get_file(), !self.side_to_move)
+            } else {
+                0
+            }
+            ^ Zobrist::castles(
+                self.castle_rights[self.side_to_move.to_index()],
+                self.side_to_move,
+            )
+            ^ Zobrist::castles(
+                self.castle_rights[(!self.side_to_move).to_index()],
+                !self.side_to_move,
+            )
+            ^ if self.side_to_move == Color::Black {
+                Zobrist::color()
+            } else {
+                0
+            }
+    }
+
     /// Hash the reserves using prime-number multiplication.
     fn reserve_hash(&self) -> u64 {
         const PRIMES: [u64; 5] = [2, 3, 5, 7, 11]; // one per droppable piece type

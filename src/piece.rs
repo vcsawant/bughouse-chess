@@ -50,6 +50,13 @@ impl Piece {
         *self as usize
     }
 
+    /// Convert an index back to a `Piece`. Reverse of `to_index()`.
+    /// Returns `None` for out-of-range indices.
+    #[inline]
+    pub fn from_index(idx: usize) -> Option<Piece> {
+        ALL_PIECES.get(idx).copied()
+    }
+
     /// Get the index for non-king pieces (Pawn=0, Knight=1, Bishop=2, Rook=3, Queen=4).
     /// Returns `None` for King.
     #[inline]
